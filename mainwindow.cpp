@@ -1,29 +1,219 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "DatabaseManager.h"
+#include "PasswordRepository.h"
 #include <QMessageBox>
-#include <QStandardItemModel>
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QDateTime>
 #include <QDebug>
+#include <QCoreApplication>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , m_tableModel(nullptr)
+    , m_repository(nullptr)
 {
     ui->setupUi(this);
 
     setWindowTitle("Password Manager");
 
+    DatabaseManager& dbManager = DatabaseManager::instance();
+    QString dbPath = QCoreApplication::applicationDirPath() + "/password_manager.db";
+
+    if (!dbManager.open(dbPath)) {
+        showErrorMessage("Database Error",
+                         "Failed to open database:\n" + dbManager.lastError() +
+                             "\n\nThe application will run in offline mode.");
+    }
+
+    m_repository = new PasswordRepository(dbManager.database(), this);
+
+    m_tableModel = new PasswordTableModel(this);
+
+    connect(m_tableModel, &PasswordTableModel::dataChanged,
+            this, &MainWindow::onDataChanged);
+
+    ui->tableViewAccounts->setModel(m_tableModel);
     setupTableColumns();
     setupConnections();
+
+    loadDataFromDatabase();
+
+    if (m_tableModel->rowCount() == 0) {
+        addTestDataToDatabase();
+        loadDataFromDatabase();
+    }
 
     applyLightTheme();
 }
 
 MainWindow::~MainWindow()
 {
+    DatabaseManager::instance().close();
     delete ui;
+}
+
+void MainWindow::addTestDataToDatabase()
+{
+    if (!m_repository || !DatabaseManager::instance().isOpen()) {
+        qDebug() << "Cannot add test data: database not available";
+        return;
+    }
+
+    QString currentDate = PasswordEntry::getCurrentTimestamp();
+
+    PasswordEntry entry1;
+    entry1.title = "Google Account";
+    entry1.username = "user@gmail.com";
+    entry1.password = "google_pass_2024";
+    entry1.website = "https://google.com";
+    entry1.category = "Logins";
+    entry1.updatedAt = currentDate;
+    m_repository->insert(entry1);
+
+    PasswordEntry entry2;
+    entry2.title = "GitHub";
+    entry2.username = "developer@github.com";
+    entry2.password = "ghp_token_abc123xyz";
+    entry2.website = "https://github.com";
+    entry2.category = "Development";
+    entry2.updatedAt = currentDate;
+    m_repository->insert(entry2);
+
+    PasswordEntry entry3;
+    entry3.title = "Facebook";
+    entry3.username = "user@facebook.com";
+    entry3.password = "fb_password_2024";
+    entry3.website = "https://facebook.com";
+    entry3.category = "Social Media";
+    entry3.updatedAt = currentDate;
+    m_repository->insert(entry3);
+
+    PasswordEntry entry4;
+    entry4.title = "Privat24";
+    entry4.username = "+380501234567";
+    entry4.password = "bank_pass_123";
+    entry4.website = "https://privat24.ua";
+    entry4.category = "Banking";
+    entry4.updatedAt = currentDate;
+    m_repository->insert(entry4);
+
+    PasswordEntry entry5;
+    entry5.title = "Netflix";
+    entry5.username = "user@netflix.com";
+    entry5.password = "netflix_2024";
+    entry5.website = "https://netflix.com";
+    entry5.category = "Entertainment";
+    entry5.updatedAt = currentDate;
+    m_repository->insert(entry5);
+
+    PasswordEntry entry6;
+    entry6.title = "Amazon";
+    entry6.username = "buyer@amazon.com";
+    entry6.password = "amazon_pass_2024";
+    entry6.website = "https://amazon.com";
+    entry6.category = "Shopping";
+    entry6.updatedAt = currentDate;
+    m_repository->insert(entry6);
+
+    PasswordEntry entry7;
+    entry7.title = "Twitter (X)";
+    entry7.username = "user@twitter.com";
+    entry7.password = "twitter_pass_2024";
+    entry7.website = "https://twitter.com";
+    entry7.category = "Social Media";
+    entry7.updatedAt = currentDate;
+    m_repository->insert(entry7);
+
+    PasswordEntry entry8;
+    entry8.title = "LinkedIn";
+    entry8.username = "professional@linkedin.com";
+    entry8.password = "linkedin_2024";
+    entry8.website = "https://linkedin.com";
+    entry8.category = "Professional";
+    entry8.updatedAt = currentDate;
+    m_repository->insert(entry8);
+
+    PasswordEntry entry9;
+    entry9.title = "Home Wi-Fi";
+    entry9.username = "Admin";
+    entry9.password = "wifi_password_123";
+    entry9.website = "192.168.1.1";
+    entry9.category = "WiFi";
+    entry9.updatedAt = currentDate;
+    m_repository->insert(entry9);
+
+    PasswordEntry entry10;
+    entry10.title = "Windows 11 License";
+    entry10.username = "user@microsoft.com";
+    entry10.password = "WIN-XXXXX-XXXXX-XXXXX";
+    entry10.website = "https://microsoft.com";
+    entry10.category = "Software Licenses";
+    entry10.updatedAt = currentDate;
+    m_repository->insert(entry10);
+
+    qDebug() << "Added 10 test entries to database";
+    ui->lblStatus->setText("Added 10 test entries to database");
+}
+
+void MainWindow::loadDataFromDatabase()
+{
+    if (m_repository && DatabaseManager::instance().isOpen()) {
+        QList<PasswordEntry> entries = m_repository->loadAll();
+        m_tableModel->setEntries(entries);
+        updateStatusBar();
+        ui->lblStatus->setText(QString("Loaded %1 entries from database").arg(entries.size()));
+    }
+}
+
+void MainWindow::saveEntryToDatabase(const PasswordEntry &entry)
+{
+    if (!m_repository || !DatabaseManager::instance().isOpen()) {
+        showErrorMessage("Database Error", "Cannot save: database is not available");
+        return;
+    }
+
+    if (m_repository->insert(entry)) {
+        ui->lblStatus->setText("Entry saved to database");
+    } else {
+        showErrorMessage("Save Error", "Failed to save entry to database");
+    }
+}
+
+void MainWindow::updateEntryInDatabase(const PasswordEntry &entry)
+{
+    if (!m_repository || !DatabaseManager::instance().isOpen()) {
+        showErrorMessage("Database Error", "Cannot update: database is not available");
+        return;
+    }
+
+    if (m_repository->update(entry)) {
+        ui->lblStatus->setText("Entry updated in database");
+    } else {
+        showErrorMessage("Update Error", "Failed to update entry in database");
+    }
+}
+
+void MainWindow::deleteEntryFromDatabase(int id)
+{
+    if (!m_repository || !DatabaseManager::instance().isOpen()) {
+        showErrorMessage("Database Error", "Cannot delete: database is not available");
+        return;
+    }
+
+    if (m_repository->remove(id)) {
+        ui->lblStatus->setText("Entry deleted from database");
+    } else {
+        showErrorMessage("Delete Error", "Failed to delete entry from database");
+    }
+}
+
+void MainWindow::showErrorMessage(const QString &title, const QString &message)
+{
+    QMessageBox::critical(this, title, message);
+    qDebug() << title << ":" << message;
 }
 
 void MainWindow::applyLightTheme()
@@ -42,16 +232,14 @@ void MainWindow::applyLightTheme()
         "QLineEdit { background-color: white; border: 1px solid #90caf9; border-radius: 4px; padding: 6px 8px; color: #1565c0; }"
         "QLineEdit:focus { border-color: #42a5f5; }"
         "QPushButton { background-color: #e3f2fd; border: 1px solid #90caf9; border-radius: 4px; padding: 6px 12px; color: #1565c0; font-weight: bold; }"
-        "QPushButton:hover { background-color: #90caf9; border-color: #42a5f5; color: #0d47a1; }"
+        "QPushButton:hover { background-color: #90caf9; }"
         "QPushButton#clearButton { background-color: #ffebee; border-color: #ef9a9a; color: #c62828; }"
         "QPushButton#clearButton:hover { background-color: #ffcdd2; }"
-        "QTableView { background-color: white; alternate-background-color: #f8fbff; gridline-color: #e3f2fd; border: 1px solid #bbdef5; border-radius: 4px; }"
+        "QTableView { background-color: white; alternate-background-color: #f8fbff; gridline-color: #e3f2fd; border: 1px solid #bbdef5; }"
         "QTableView::item:selected { background-color: #90caf9; color: #0d47a1; }"
-        "QHeaderView::section { background-color: #e3f2fd; padding: 6px; border: none; border-right: 1px solid #bbdef5; border-bottom: 1px solid #bbdef5; color: #1565c0; font-weight: bold; }"
-        "QHeaderView::section:hover { background-color: #bbdef5; }"
-        "QStatusBar { background-color: #e3f2fd; color: #1565c0; border-top: 1px solid #bbdef5; }"
-        "QLabel { color: #1565c0; font-weight: 500; }"
-        "QLabel#lblStatus, QLabel#lblTotal, QLabel#lblFiltered { color: #42a5f5; font-size: 11px; }";
+        "QHeaderView::section { background-color: #e3f2fd; padding: 6px; border: none; border-right: 1px solid #bbdef5; color: #1565c0; font-weight: bold; }"
+        "QStatusBar { background-color: #e3f2fd; color: #1565c0; }"
+        "QLabel { color: #1565c0; }";
 
     setStyleSheet(styleSheet);
     if (ui->lblStatus) ui->lblStatus->setText("Light theme applied");
@@ -61,53 +249,29 @@ void MainWindow::applyDarkTheme()
 {
     QString styleSheet =
         "QMainWindow { background-color: #2c2b26; }"
-        "QMenuBar { background-color: #3d3b35; color: #f5d742; border-bottom: 1px solid #5a564c; font-weight: bold; }"
+        "QMenuBar { background-color: #3d3b35; color: #f5d742; border-bottom: 1px solid #5a564c; }"
         "QMenuBar::item:selected { background-color: #5a564c; color: #ffea4a; }"
-        "QMenu { background-color: #3d3b35; border: 1px solid #5a564c; border-radius: 4px; color: #f5d742; }"
+        "QMenu { background-color: #3d3b35; border: 1px solid #5a564c; color: #f5d742; }"
         "QMenu::item:selected { background-color: #5a564c; color: #ffea4a; }"
-        "QToolBar { background-color: #3d3b35; border-bottom: 1px solid #5a564c; spacing: 4px; }"
-        "QToolButton { color: #f5d742; font-weight: bold; border-radius: 4px; padding: 6px 10px; }"
+        "QToolBar { background-color: #3d3b35; border-bottom: 1px solid #5a564c; }"
+        "QToolButton { color: #f5d742; }"
         "QToolButton:hover { background-color: #5a564c; color: #ffea4a; }"
-        "QComboBox { background-color: #2c2b26; border: 1px solid #5a564c; border-radius: 4px; padding: 5px 8px; color: #f5d742; }"
-        "QComboBox:hover { border-color: #f5d742; }"
-        "QLineEdit { background-color: #2c2b26; border: 1px solid #5a564c; border-radius: 4px; padding: 6px 8px; color: #f5d742; }"
-        "QLineEdit:focus { border-color: #f5d742; }"
-        "QPushButton { background-color: #3d3b35; border: 1px solid #5a564c; border-radius: 4px; padding: 6px 12px; color: #f5d742; font-weight: bold; }"
-        "QPushButton:hover { background-color: #5a564c; border-color: #f5d742; color: #ffea4a; }"
-        "QPushButton#clearButton { background-color: #4a3a35; border-color: #8b5a4a; color: #ffaa66; }"
-        "QPushButton#clearButton:hover { background-color: #5c4840; }"
-        "QTableView { background-color: #2c2b26; alternate-background-color: #33312c; gridline-color: #4a4842; border: 1px solid #5a564c; border-radius: 4px; color: #f5d742; }"
+        "QComboBox { background-color: #2c2b26; border: 1px solid #5a564c; color: #f5d742; }"
+        "QLineEdit { background-color: #2c2b26; border: 1px solid #5a564c; color: #f5d742; }"
+        "QPushButton { background-color: #3d3b35; border: 1px solid #5a564c; color: #f5d742; }"
+        "QPushButton:hover { background-color: #5a564c; color: #ffea4a; }"
+        "QTableView { background-color: #2c2b26; alternate-background-color: #33312c; gridline-color: #4a4842; color: #f5d742; }"
         "QTableView::item:selected { background-color: #5a564c; color: #ffea4a; }"
-        "QHeaderView::section { background-color: #3d3b35; padding: 6px; border: none; border-right: 1px solid #5a564c; border-bottom: 1px solid #5a564c; color: #f5d742; font-weight: bold; }"
-        "QHeaderView::section:hover { background-color: #5a564c; color: #ffea4a; }"
-        "QStatusBar { background-color: #3d3b35; color: #f5d742; border-top: 1px solid #5a564c; }"
-        "QLabel { color: #f5d742; font-weight: 500; }"
-        "QLabel#lblStatus, QLabel#lblTotal, QLabel#lblFiltered { color: #d4c43a; font-size: 11px; }";
+        "QHeaderView::section { background-color: #3d3b35; color: #f5d742; }"
+        "QStatusBar { background-color: #3d3b35; color: #f5d742; }"
+        "QLabel { color: #f5d742; }";
 
     setStyleSheet(styleSheet);
     if (ui->lblStatus) ui->lblStatus->setText("Dark theme applied");
 }
 
-void MainWindow::onThemeLightBlue()
-{
-    applyLightTheme();
-}
-
-void MainWindow::onThemeDarkYellow()
-{
-    applyDarkTheme();
-}
-
 void MainWindow::setupTableColumns()
 {
-    if (!ui->tableViewAccounts) return;
-
-    QStandardItemModel* model = new QStandardItemModel(0, 7, this);
-    QStringList headers;
-    headers << "ID" << "Title" << "Username" << "Password" << "Website" << "Category" << "Updated At";
-    model->setHorizontalHeaderLabels(headers);
-    ui->tableViewAccounts->setModel(model);
-
     ui->tableViewAccounts->setColumnWidth(0, 50);
     ui->tableViewAccounts->setColumnWidth(1, 150);
     ui->tableViewAccounts->setColumnWidth(2, 120);
@@ -127,68 +291,6 @@ void MainWindow::setupTableColumns()
 
     ui->tableViewAccounts->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tableViewAccounts->setSelectionMode(QAbstractItemView::SingleSelection);
-
-    addTestData();
-
-    updateStatusBar();
-}
-
-void MainWindow::addTestData()
-{
-    QStandardItemModel* model = qobject_cast<QStandardItemModel*>(ui->tableViewAccounts->model());
-    if (!model) return;
-
-    QString currentDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
-
-    QList<QStandardItem*> row1;
-    row1 << new QStandardItem("1")
-         << new QStandardItem("Google Account")
-         << new QStandardItem("user@gmail.com")
-         << new QStandardItem("pass123456")
-         << new QStandardItem("https://google.com")
-         << new QStandardItem("Logins")
-         << new QStandardItem(currentDate);
-    model->appendRow(row1);
-
-    QList<QStandardItem*> row2;
-    row2 << new QStandardItem("2")
-         << new QStandardItem("GitHub")
-         << new QStandardItem("developer@github.com")
-         << new QStandardItem("ghp_token_xyz789")
-         << new QStandardItem("https://github.com")
-         << new QStandardItem("Development")
-         << new QStandardItem(currentDate);
-    model->appendRow(row2);
-
-    QList<QStandardItem*> row3;
-    row3 << new QStandardItem("3")
-         << new QStandardItem("Facebook")
-         << new QStandardItem("user@facebook.com")
-         << new QStandardItem("fb_password_2024")
-         << new QStandardItem("https://facebook.com")
-         << new QStandardItem("Social Media")
-         << new QStandardItem(currentDate);
-    model->appendRow(row3);
-
-    QList<QStandardItem*> row4;
-    row4 << new QStandardItem("4")
-         << new QStandardItem("PrivatBank")
-         << new QStandardItem("john.doe")
-         << new QStandardItem("bank_pass_2024")
-         << new QStandardItem("https://privatbank.ua")
-         << new QStandardItem("Banking")
-         << new QStandardItem(currentDate);
-    model->appendRow(row4);
-
-    QList<QStandardItem*> row5;
-    row5 << new QStandardItem("5")
-         << new QStandardItem("Netflix")
-         << new QStandardItem("user@netflix.com")
-         << new QStandardItem("netflix_pass")
-         << new QStandardItem("https://netflix.com")
-         << new QStandardItem("Entertainment")
-         << new QStandardItem(currentDate);
-    model->appendRow(row5);
 }
 
 void MainWindow::setupConnections()
@@ -212,28 +314,40 @@ void MainWindow::setupConnections()
 
 void MainWindow::onNewEntry()
 {
-    QStandardItemModel* model = qobject_cast<QStandardItemModel*>(ui->tableViewAccounts->model());
-    if (!model) return;
+    PasswordEntry newEntry;
+    newEntry.title = "New Entry";
+    newEntry.username = "";
+    newEntry.password = "";
+    newEntry.website = "";
+    newEntry.category = ui->comboBox->currentText() != "All" ? ui->comboBox->currentText() : "General";
+    newEntry.updatedAt = PasswordEntry::getCurrentTimestamp();
 
-    int newId = model->rowCount() + 1;
-    QString currentDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
+    // Зберігаємо в базу даних
+    if (m_repository && DatabaseManager::instance().isOpen()) {
+        if (m_repository->insert(newEntry)) {
+            int newId = m_repository->getLastInsertId();
+            newEntry.id = newId;
+            m_tableModel->addEntry(newEntry);
 
-    QList<QStandardItem*> newRow;
-    newRow << new QStandardItem(QString::number(newId))
-           << new QStandardItem("New Entry")
-           << new QStandardItem("")
-           << new QStandardItem("")
-           << new QStandardItem("")
-           << new QStandardItem("")
-           << new QStandardItem(currentDate);
-    model->appendRow(newRow);
+            int newRow = m_tableModel->rowCount() - 1;
+            QModelIndex editIndex = m_tableModel->index(newRow, 1);
+            ui->tableViewAccounts->setCurrentIndex(editIndex);
+            ui->tableViewAccounts->edit(editIndex);
 
-    QModelIndex newIndex = model->index(model->rowCount() - 1, 1);
-    ui->tableViewAccounts->setCurrentIndex(newIndex);
-    ui->tableViewAccounts->edit(newIndex);
-
-    updateStatusBar();
-    if (ui->lblStatus) ui->lblStatus->setText("New entry created");
+            updateStatusBar();
+            ui->lblStatus->setText("New entry created and saved to database");
+        } else {
+            showErrorMessage("Database Error", "Failed to create new entry");
+        }
+    } else {
+        m_tableModel->addEntry(newEntry);
+        int newRow = m_tableModel->rowCount() - 1;
+        QModelIndex editIndex = m_tableModel->index(newRow, 1);
+        ui->tableViewAccounts->setCurrentIndex(editIndex);
+        ui->tableViewAccounts->edit(editIndex);
+        updateStatusBar();
+        ui->lblStatus->setText("New entry created (offline mode)");
+    }
 }
 
 void MainWindow::onEdit()
@@ -241,7 +355,7 @@ void MainWindow::onEdit()
     QModelIndex current = ui->tableViewAccounts->currentIndex();
     if (current.isValid()) {
         ui->tableViewAccounts->edit(current);
-        if (ui->lblStatus) ui->lblStatus->setText("Editing entry");
+        ui->lblStatus->setText("Editing entry");
     } else {
         QMessageBox::information(this, "Edit", "Please select an entry to edit");
     }
@@ -255,38 +369,54 @@ void MainWindow::onDelete()
         return;
     }
 
+    PasswordEntry entry = m_tableModel->getEntryAt(current.row());
+
     QMessageBox::StandardButton reply = QMessageBox::question(
-        this,
-        "Delete Record",
-        "Are you sure you want to delete the selected record?",
+        this, "Delete Record",
+        QString("Are you sure you want to delete entry '%1'?").arg(entry.title),
         QMessageBox::Yes | QMessageBox::No
         );
 
     if (reply == QMessageBox::Yes) {
-        QStandardItemModel* model = qobject_cast<QStandardItemModel*>(ui->tableViewAccounts->model());
-        if (model) {
-            model->removeRow(current.row());
-            for (int i = 0; i < model->rowCount(); i++) {
-                model->setData(model->index(i, 0), QString::number(i + 1));
-            }
-            updateStatusBar();
-            if (ui->lblStatus) ui->lblStatus->setText("Entry deleted");
+        if (entry.id > 0 && m_repository && DatabaseManager::instance().isOpen()) {
+            deleteEntryFromDatabase(entry.id);
         }
+        m_tableModel->removeEntry(current.row());
+        updateStatusBar();
+        ui->lblStatus->setText("Entry deleted");
     }
+}
+
+void MainWindow::onDataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QVector<int> &roles)
+{
+    Q_UNUSED(bottomRight);
+    Q_UNUSED(roles);
+
+    PasswordEntry entry = m_tableModel->getEntryAt(topLeft.row());
+
+    if (entry.id > 0) {
+        entry.updatedAt = PasswordEntry::getCurrentTimestamp();
+        updateEntryInDatabase(entry);
+        QModelIndex dateIndex = m_tableModel->index(topLeft.row(), 6);
+        emit m_tableModel->dataChanged(dateIndex, dateIndex);
+    } else if (entry.id == 0 && entry.title != "New Entry") {
+        entry.updatedAt = PasswordEntry::getCurrentTimestamp();
+        saveEntryToDatabase(entry);
+    }
+
+    updateStatusBar();
 }
 
 void MainWindow::onCopyUsername()
 {
     QModelIndex current = ui->tableViewAccounts->currentIndex();
     if (current.isValid()) {
-        QModelIndex usernameIndex = current.sibling(current.row(), 2);
-        QString username = ui->tableViewAccounts->model()->data(usernameIndex).toString();
-
+        QString username = m_tableModel->data(m_tableModel->index(current.row(), 2)).toString();
         if (!username.isEmpty()) {
             QGuiApplication::clipboard()->setText(username);
-            if (ui->lblStatus) ui->lblStatus->setText("Username copied: " + username);
+            ui->lblStatus->setText("Username copied: " + username);
         } else {
-            if (ui->lblStatus) ui->lblStatus->setText("No username to copy");
+            ui->lblStatus->setText("No username to copy");
         }
     } else {
         QMessageBox::information(this, "Copy", "Please select an entry");
@@ -297,15 +427,12 @@ void MainWindow::onCopyPassword()
 {
     QModelIndex current = ui->tableViewAccounts->currentIndex();
     if (current.isValid()) {
-        // Password в колонці 3 (0-ID, 1-Title, 2-Username, 3-Password)
-        QModelIndex passwordIndex = current.sibling(current.row(), 3);
-        QString password = ui->tableViewAccounts->model()->data(passwordIndex).toString();
-
+        QString password = m_tableModel->data(m_tableModel->index(current.row(), 3)).toString();
         if (!password.isEmpty()) {
             QGuiApplication::clipboard()->setText(password);
-            if (ui->lblStatus) ui->lblStatus->setText("Password copied");
+            ui->lblStatus->setText("Password copied");
         } else {
-            if (ui->lblStatus) ui->lblStatus->setText("No password to copy");
+            ui->lblStatus->setText("No password to copy");
         }
     } else {
         QMessageBox::information(this, "Copy", "Please select an entry");
@@ -314,10 +441,12 @@ void MainWindow::onCopyPassword()
 
 void MainWindow::onSave()
 {
-    QMessageBox::information(this, "Save",
-                             "Save functionality will be implemented in future practical works\n"
-                             "Data will be saved to SQLite database");
-    if (ui->lblStatus) ui->lblStatus->setText("Ready to save");
+    if (m_repository && DatabaseManager::instance().isOpen()) {
+        QMessageBox::information(this, "Save", "All changes are automatically saved to the database");
+        ui->lblStatus->setText("Database is up to date");
+    } else {
+        QMessageBox::warning(this, "Save", "Database is not available. Changes are only in memory.");
+    }
 }
 
 void MainWindow::onExit()
@@ -328,35 +457,29 @@ void MainWindow::onExit()
 void MainWindow::onGenerate()
 {
     QMessageBox::information(this, "Generate Password",
-                             "Password generator will be implemented in future practical works\n"
-                             "Will generate secure random passwords");
+                             "Password generator will be implemented in future practical works");
 }
 
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, "About Password Manager",
-                       "Password Manager v1.0\n\n"
+                       "Password Manager v2.0\n\n"
                        "A secure password management application\n"
                        "Built with Qt Framework\n\n"
                        "Features:\n"
-                       "• Store and manage passwords\n"
-                       "• Copy usernames and passwords\n"
+                       "• SQLite database storage\n"
+                       "• CRUD operations with database\n"
+                       "• In-place cell editing\n"
                        "• Search and filter entries\n"
-                       "• Light & Dark themes\n"
-                       "• In-place cell editing\n\n"
-                       "Created for Practical Work No.16\n"
-                       "Course: Qt Desktop Development");
+                       "• Light & Dark themes\n\n"
+                       "Practical Work No.17 - SQLite Integration");
 }
 
 void MainWindow::onSearchTextChanged(const QString &text)
 {
     filterTable(text, ui->comboBox->currentText());
     if (ui->lblStatus) {
-        if (text.isEmpty()) {
-            ui->lblStatus->setText("Search cleared");
-        } else {
-            ui->lblStatus->setText("Searching: " + text);
-        }
+        ui->lblStatus->setText(text.isEmpty() ? "Search cleared" : "Searching: " + text);
     }
 }
 
@@ -369,32 +492,25 @@ void MainWindow::onClearSearch()
 
 void MainWindow::onCategoryChanged(int index)
 {
-    QString category = ui->comboBox->currentText();
-    filterTable(ui->searchEdit->text(), category);
-    if (ui->lblStatus) ui->lblStatus->setText("Filtering by category: " + category);
+    Q_UNUSED(index);
+    filterTable(ui->searchEdit->text(), ui->comboBox->currentText());
+    if (ui->lblStatus) ui->lblStatus->setText("Filtering by category: " + ui->comboBox->currentText());
 }
 
 void MainWindow::filterTable(const QString &searchText, const QString &category)
 {
-    QStandardItemModel* model = qobject_cast<QStandardItemModel*>(ui->tableViewAccounts->model());
-    if (!model) return;
-
-    int filteredCount = 0;
-
-    for (int i = 0; i < model->rowCount(); i++) {
+    for (int i = 0; i < m_tableModel->rowCount(); i++) {
         bool showRow = true;
 
         if (category != "All") {
-            QString itemCategory = model->data(model->index(i, 5)).toString(); // Category в колонці 5
-            if (itemCategory != category) {
-                showRow = false;
-            }
+            QString itemCategory = m_tableModel->data(m_tableModel->index(i, 5)).toString();
+            if (itemCategory != category) showRow = false;
         }
 
         if (showRow && !searchText.isEmpty()) {
-            QString title = model->data(model->index(i, 1)).toString();
-            QString username = model->data(model->index(i, 2)).toString();
-            QString website = model->data(model->index(i, 4)).toString();
+            QString title = m_tableModel->data(m_tableModel->index(i, 1)).toString();
+            QString username = m_tableModel->data(m_tableModel->index(i, 2)).toString();
+            QString website = m_tableModel->data(m_tableModel->index(i, 4)).toString();
 
             if (!title.contains(searchText, Qt::CaseInsensitive) &&
                 !username.contains(searchText, Qt::CaseInsensitive) &&
@@ -404,20 +520,30 @@ void MainWindow::filterTable(const QString &searchText, const QString &category)
         }
 
         ui->tableViewAccounts->setRowHidden(i, !showRow);
-        if (showRow) filteredCount++;
     }
-
-    if (ui->lblFiltered) {
-        ui->lblFiltered->setText(QString("Filtered: %1").arg(filteredCount));
-    }
+    updateStatusBar();
 }
 
 void MainWindow::updateStatusBar()
 {
-    QStandardItemModel* model = qobject_cast<QStandardItemModel*>(ui->tableViewAccounts->model());
-    if (model && ui->lblTotal && ui->lblFiltered) {
-        int total = model->rowCount();
+    if (ui->lblTotal && ui->lblFiltered) {
+        int total = m_tableModel->rowCount();
         ui->lblTotal->setText(QString("Total: %1").arg(total));
-        ui->lblFiltered->setText(QString("Filtered: %1").arg(total));
+
+        int visible = 0;
+        for (int i = 0; i < total; i++) {
+            if (!ui->tableViewAccounts->isRowHidden(i)) visible++;
+        }
+        ui->lblFiltered->setText(QString("Filtered: %1").arg(visible));
     }
+}
+
+void MainWindow::onThemeLightBlue()
+{
+    applyLightTheme();
+}
+
+void MainWindow::onThemeDarkYellow()
+{
+    applyDarkTheme();
 }

@@ -6,7 +6,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql)
 
 qt_standard_project_setup()
 
@@ -16,12 +16,20 @@ qt_add_executable(PasswordManager
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
+    DatabaseManager.cpp
+    DatabaseManager.h
+    PasswordRepository.cpp
+    PasswordRepository.h
+    PasswordEntry.h
+    PasswordTableModel.cpp
+    PasswordTableModel.h
 )
 
 target_link_libraries(PasswordManager
     PRIVATE
         Qt::Core
         Qt::Widgets
+        Qt::Sql
 )
 
 install(TARGETS PasswordManager
