@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include "PasswordEntry.h"
 #include "PasswordTableModel.h"
+#include "PasswordFilterProxyModel.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -34,11 +35,12 @@ private slots:
     void onSearchTextChanged(const QString &text);
     void onClearSearch();
     void onCategoryChanged(int index);
-    void onDataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QVector<int> &roles);
+    void onResetFilters();
 
 private:
     Ui::MainWindow *ui;
     PasswordTableModel *m_tableModel;
+    PasswordFilterProxyModel *m_proxyModel;
     PasswordRepository *m_repository;
 
     void setupTableColumns();
@@ -46,13 +48,14 @@ private:
     void applyLightTheme();
     void applyDarkTheme();
     void updateStatusBar();
-    void filterTable(const QString &searchText, const QString &category);
+    void updateEmptyState();
     void loadDataFromDatabase();
     void addTestDataToDatabase();
-    void saveEntryToDatabase(const PasswordEntry &entry);
-    void updateEntryInDatabase(const PasswordEntry &entry);
-    void deleteEntryFromDatabase(int id);
+    void reloadTable();
     void showErrorMessage(const QString &title, const QString &message);
+
+    int getCurrentSourceRow() const;
+    PasswordEntry getCurrentEntry() const;
 };
 
 #endif // MAINWINDOW_H

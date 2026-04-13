@@ -23,6 +23,8 @@ qt_add_executable(PasswordManager
     PasswordEntry.h
     PasswordTableModel.cpp
     PasswordTableModel.h
+    PasswordFilterProxyModel.cpp
+    PasswordFilterProxyModel.h
 )
 
 target_link_libraries(PasswordManager

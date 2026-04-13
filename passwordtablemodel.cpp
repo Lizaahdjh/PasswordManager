@@ -1,8 +1,10 @@
 #include "PasswordTableModel.h"
+#include "PasswordRepository.h"
 #include <QDebug>
 
 PasswordTableModel::PasswordTableModel(QObject *parent)
     : QAbstractTableModel(parent)
+    , m_repository(nullptr)
 {
     m_headers << "ID" << "Title" << "Username" << "Password" << "Website" << "Category" << "Updated At";
 }
@@ -21,7 +23,7 @@ int PasswordTableModel::columnCount(const QModelIndex &parent) const
 
 QVariant PasswordTableModel::data(const QModelIndex &index, int role) const
 {
-    if (!index.isValid() || index.row() >= m_entries.size())
+    if (!index.isValid() || index.row() >= m_entries.size() || index.row() < 0)
         return QVariant();
 
     const PasswordEntry &entry = m_entries[index.row()];
@@ -44,10 +46,14 @@ QVariant PasswordTableModel::data(const QModelIndex &index, int role) const
 
 bool PasswordTableModel::setData(const QModelIndex &index, const QVariant &value, int role)
 {
-    if (!index.isValid() || role != Qt::EditRole || index.row() >= m_entries.size())
+    if (!index.isValid() || role != Qt::EditRole)
+        return false;
+
+    if (index.row() >= m_entries.size())
         return false;
 
     PasswordEntry &entry = m_entries[index.row()];
+    PasswordEntry oldEntry = entry;
 
     switch (index.column()) {
     case 1: entry.title = value.toString(); break;
@@ -60,7 +66,14 @@ bool PasswordTableModel::setData(const QModelIndex &index, const QVariant &value
 
     entry.updatedAt = PasswordEntry::getCurrentTimestamp();
 
-    emit dataChanged(index, index);
+    if (m_repository && entry.id > 0) {
+        if (!m_repository->update(entry)) {
+            entry = oldEntry;
+            return false;
+        }
+    }
+
+    emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole});
     return true;
 }
 
@@ -80,13 +93,19 @@ QVariant PasswordTableModel::headerData(int section, Qt::Orientation orientation
     if (role != Qt::DisplayRole)
         return QVariant();
 
-    if (orientation == Qt::Horizontal && section >= 0 && section < m_headers.size())
-        return m_headers[section];
-
-    if (orientation == Qt::Vertical)
+    if (orientation == Qt::Horizontal) {
+        if (section >= 0 && section < m_headers.size())
+            return m_headers[section];
+    } else {
         return QString::number(section + 1);
+    }
 
     return QVariant();
+}
+
+void PasswordTableModel::setRepository(PasswordRepository *repository)
+{
+    m_repository = repository;
 }
 
 void PasswordTableModel::setEntries(const QList<PasswordEntry> &entries)
@@ -125,4 +144,18 @@ void PasswordTableModel::removeEntry(int row)
         m_entries.removeAt(row);
         endRemoveRows();
     }
+}
+
+void PasswordTableModel::reloadFromDatabase()
+{
+    if (m_repository) {
+        QList<PasswordEntry> entries = m_repository->loadAll();
+        setEntries(entries);
+    }
+}
+
+void PasswordTableModel::refresh()
+{
+    beginResetModel();
+    endResetModel();
 }

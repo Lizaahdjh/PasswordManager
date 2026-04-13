@@ -13,6 +13,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_tableModel(nullptr)
+    , m_proxyModel(nullptr)
     , m_repository(nullptr)
 {
     ui->setupUi(this);
@@ -31,11 +32,12 @@ MainWindow::MainWindow(QWidget *parent)
     m_repository = new PasswordRepository(dbManager.database(), this);
 
     m_tableModel = new PasswordTableModel(this);
+    m_tableModel->setRepository(m_repository);
 
-    connect(m_tableModel, &PasswordTableModel::dataChanged,
-            this, &MainWindow::onDataChanged);
+    m_proxyModel = new PasswordFilterProxyModel(this);
+    m_proxyModel->setSourceModel(m_tableModel);
 
-    ui->tableViewAccounts->setModel(m_tableModel);
+    ui->tableViewAccounts->setModel(m_proxyModel);
     setupTableColumns();
     setupConnections();
 
@@ -47,12 +49,40 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     applyLightTheme();
+    updateEmptyState();
 }
 
 MainWindow::~MainWindow()
 {
     DatabaseManager::instance().close();
     delete ui;
+}
+
+int MainWindow::getCurrentSourceRow() const
+{
+    QModelIndex proxyIndex = ui->tableViewAccounts->currentIndex();
+    QModelIndex sourceIndex = m_proxyModel->mapToSource(proxyIndex);
+    return sourceIndex.row();
+}
+
+PasswordEntry MainWindow::getCurrentEntry() const
+{
+    int sourceRow = getCurrentSourceRow();
+    if (sourceRow >= 0 && sourceRow < m_tableModel->rowCount()) {
+        return m_tableModel->getEntryAt(sourceRow);
+    }
+    return PasswordEntry();
+}
+
+void MainWindow::loadDataFromDatabase()
+{
+    if (m_repository && DatabaseManager::instance().isOpen()) {
+        QList<PasswordEntry> entries = m_repository->loadAll();
+        m_tableModel->setEntries(entries);
+        updateStatusBar();
+        ui->lblStatus->setText(QString("Loaded %1 entries from database").arg(entries.size()));
+    }
+    updateEmptyState();
 }
 
 void MainWindow::addTestDataToDatabase()
@@ -64,150 +94,33 @@ void MainWindow::addTestDataToDatabase()
 
     QString currentDate = PasswordEntry::getCurrentTimestamp();
 
-    PasswordEntry entry1;
-    entry1.title = "Google Account";
-    entry1.username = "user@gmail.com";
-    entry1.password = "google_pass_2024";
-    entry1.website = "https://google.com";
-    entry1.category = "Logins";
-    entry1.updatedAt = currentDate;
-    m_repository->insert(entry1);
+    QList<PasswordEntry> testEntries = {
+        {0, "Google Account", "user@gmail.com", "google_pass_2024", "https://google.com", "Logins", currentDate},
+        {0, "GitHub", "developer@github.com", "ghp_token_abc123xyz", "https://github.com", "Development", currentDate},
+        {0, "Facebook", "user@facebook.com", "fb_password_2024", "https://facebook.com", "Social Media", currentDate},
+        {0, "Privat24", "+380501234567", "bank_pass_123", "https://privat24.ua", "Banking", currentDate},
+        {0, "Netflix", "user@netflix.com", "netflix_2024", "https://netflix.com", "Entertainment", currentDate},
+        {0, "Amazon", "buyer@amazon.com", "amazon_pass_2024", "https://amazon.com", "Shopping", currentDate},
+        {0, "Twitter (X)", "user@twitter.com", "twitter_pass_2024", "https://twitter.com", "Social Media", currentDate},
+        {0, "LinkedIn", "professional@linkedin.com", "linkedin_2024", "https://linkedin.com", "Professional", currentDate},
+        {0, "Home Wi-Fi", "Admin", "wifi_password_123", "192.168.1.1", "WiFi", currentDate},
+        {0, "Windows 11 License", "user@microsoft.com", "WIN-XXXXX-XXXXX-XXXXX", "https://microsoft.com", "Software Licenses", currentDate}
+    };
 
-    PasswordEntry entry2;
-    entry2.title = "GitHub";
-    entry2.username = "developer@github.com";
-    entry2.password = "ghp_token_abc123xyz";
-    entry2.website = "https://github.com";
-    entry2.category = "Development";
-    entry2.updatedAt = currentDate;
-    m_repository->insert(entry2);
+    for (const auto &entry : testEntries) {
+        m_repository->insert(entry);
+    }
 
-    PasswordEntry entry3;
-    entry3.title = "Facebook";
-    entry3.username = "user@facebook.com";
-    entry3.password = "fb_password_2024";
-    entry3.website = "https://facebook.com";
-    entry3.category = "Social Media";
-    entry3.updatedAt = currentDate;
-    m_repository->insert(entry3);
-
-    PasswordEntry entry4;
-    entry4.title = "Privat24";
-    entry4.username = "+380501234567";
-    entry4.password = "bank_pass_123";
-    entry4.website = "https://privat24.ua";
-    entry4.category = "Banking";
-    entry4.updatedAt = currentDate;
-    m_repository->insert(entry4);
-
-    PasswordEntry entry5;
-    entry5.title = "Netflix";
-    entry5.username = "user@netflix.com";
-    entry5.password = "netflix_2024";
-    entry5.website = "https://netflix.com";
-    entry5.category = "Entertainment";
-    entry5.updatedAt = currentDate;
-    m_repository->insert(entry5);
-
-    PasswordEntry entry6;
-    entry6.title = "Amazon";
-    entry6.username = "buyer@amazon.com";
-    entry6.password = "amazon_pass_2024";
-    entry6.website = "https://amazon.com";
-    entry6.category = "Shopping";
-    entry6.updatedAt = currentDate;
-    m_repository->insert(entry6);
-
-    PasswordEntry entry7;
-    entry7.title = "Twitter (X)";
-    entry7.username = "user@twitter.com";
-    entry7.password = "twitter_pass_2024";
-    entry7.website = "https://twitter.com";
-    entry7.category = "Social Media";
-    entry7.updatedAt = currentDate;
-    m_repository->insert(entry7);
-
-    PasswordEntry entry8;
-    entry8.title = "LinkedIn";
-    entry8.username = "professional@linkedin.com";
-    entry8.password = "linkedin_2024";
-    entry8.website = "https://linkedin.com";
-    entry8.category = "Professional";
-    entry8.updatedAt = currentDate;
-    m_repository->insert(entry8);
-
-    PasswordEntry entry9;
-    entry9.title = "Home Wi-Fi";
-    entry9.username = "Admin";
-    entry9.password = "wifi_password_123";
-    entry9.website = "192.168.1.1";
-    entry9.category = "WiFi";
-    entry9.updatedAt = currentDate;
-    m_repository->insert(entry9);
-
-    PasswordEntry entry10;
-    entry10.title = "Windows 11 License";
-    entry10.username = "user@microsoft.com";
-    entry10.password = "WIN-XXXXX-XXXXX-XXXXX";
-    entry10.website = "https://microsoft.com";
-    entry10.category = "Software Licenses";
-    entry10.updatedAt = currentDate;
-    m_repository->insert(entry10);
-
-    qDebug() << "Added 10 test entries to database";
-    ui->lblStatus->setText("Added 10 test entries to database");
+    qDebug() << "Added" << testEntries.size() << "test entries to database";
 }
 
-void MainWindow::loadDataFromDatabase()
+void MainWindow::reloadTable()
 {
-    if (m_repository && DatabaseManager::instance().isOpen()) {
-        QList<PasswordEntry> entries = m_repository->loadAll();
-        m_tableModel->setEntries(entries);
-        updateStatusBar();
-        ui->lblStatus->setText(QString("Loaded %1 entries from database").arg(entries.size()));
-    }
-}
-
-void MainWindow::saveEntryToDatabase(const PasswordEntry &entry)
-{
-    if (!m_repository || !DatabaseManager::instance().isOpen()) {
-        showErrorMessage("Database Error", "Cannot save: database is not available");
-        return;
-    }
-
-    if (m_repository->insert(entry)) {
-        ui->lblStatus->setText("Entry saved to database");
-    } else {
-        showErrorMessage("Save Error", "Failed to save entry to database");
-    }
-}
-
-void MainWindow::updateEntryInDatabase(const PasswordEntry &entry)
-{
-    if (!m_repository || !DatabaseManager::instance().isOpen()) {
-        showErrorMessage("Database Error", "Cannot update: database is not available");
-        return;
-    }
-
-    if (m_repository->update(entry)) {
-        ui->lblStatus->setText("Entry updated in database");
-    } else {
-        showErrorMessage("Update Error", "Failed to update entry in database");
-    }
-}
-
-void MainWindow::deleteEntryFromDatabase(int id)
-{
-    if (!m_repository || !DatabaseManager::instance().isOpen()) {
-        showErrorMessage("Database Error", "Cannot delete: database is not available");
-        return;
-    }
-
-    if (m_repository->remove(id)) {
-        ui->lblStatus->setText("Entry deleted from database");
-    } else {
-        showErrorMessage("Delete Error", "Failed to delete entry from database");
-    }
+    loadDataFromDatabase();
+    m_proxyModel->refreshFilter();
+    updateStatusBar();
+    updateEmptyState();
+    ui->lblStatus->setText("Table reloaded from database");
 }
 
 void MainWindow::showErrorMessage(const QString &title, const QString &message)
@@ -291,6 +204,7 @@ void MainWindow::setupTableColumns()
 
     ui->tableViewAccounts->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->tableViewAccounts->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tableViewAccounts->setAlternatingRowColors(true);
 }
 
 void MainWindow::setupConnections()
@@ -322,32 +236,36 @@ void MainWindow::onNewEntry()
     newEntry.category = ui->comboBox->currentText() != "All" ? ui->comboBox->currentText() : "General";
     newEntry.updatedAt = PasswordEntry::getCurrentTimestamp();
 
-    // Зберігаємо в базу даних
     if (m_repository && DatabaseManager::instance().isOpen()) {
         if (m_repository->insert(newEntry)) {
             int newId = m_repository->getLastInsertId();
             newEntry.id = newId;
             m_tableModel->addEntry(newEntry);
 
-            int newRow = m_tableModel->rowCount() - 1;
-            QModelIndex editIndex = m_tableModel->index(newRow, 1);
-            ui->tableViewAccounts->setCurrentIndex(editIndex);
-            ui->tableViewAccounts->edit(editIndex);
+            m_proxyModel->refreshFilter();
+
+            int newRow = -1;
+            for (int i = 0; i < m_proxyModel->rowCount(); i++) {
+                QModelIndex proxyIndex = m_proxyModel->index(i, 1);
+                if (m_proxyModel->data(proxyIndex).toString() == "New Entry") {
+                    newRow = i;
+                    break;
+                }
+            }
+
+            if (newRow >= 0) {
+                QModelIndex editIndex = m_proxyModel->index(newRow, 1);
+                ui->tableViewAccounts->setCurrentIndex(editIndex);
+                ui->tableViewAccounts->edit(editIndex);
+            }
 
             updateStatusBar();
             ui->lblStatus->setText("New entry created and saved to database");
         } else {
             showErrorMessage("Database Error", "Failed to create new entry");
         }
-    } else {
-        m_tableModel->addEntry(newEntry);
-        int newRow = m_tableModel->rowCount() - 1;
-        QModelIndex editIndex = m_tableModel->index(newRow, 1);
-        ui->tableViewAccounts->setCurrentIndex(editIndex);
-        ui->tableViewAccounts->edit(editIndex);
-        updateStatusBar();
-        ui->lblStatus->setText("New entry created (offline mode)");
     }
+    updateEmptyState();
 }
 
 void MainWindow::onEdit()
@@ -369,7 +287,7 @@ void MainWindow::onDelete()
         return;
     }
 
-    PasswordEntry entry = m_tableModel->getEntryAt(current.row());
+    PasswordEntry entry = getCurrentEntry();
 
     QMessageBox::StandardButton reply = QMessageBox::question(
         this, "Delete Record",
@@ -379,42 +297,28 @@ void MainWindow::onDelete()
 
     if (reply == QMessageBox::Yes) {
         if (entry.id > 0 && m_repository && DatabaseManager::instance().isOpen()) {
-            deleteEntryFromDatabase(entry.id);
+            if (m_repository->remove(entry.id)) {
+                m_tableModel->removeEntry(getCurrentSourceRow());
+                ui->lblStatus->setText("Entry deleted from database");
+            } else {
+                showErrorMessage("Delete Error", "Failed to delete entry from database");
+            }
+        } else {
+            m_tableModel->removeEntry(getCurrentSourceRow());
+            ui->lblStatus->setText("Entry deleted");
         }
-        m_tableModel->removeEntry(current.row());
         updateStatusBar();
-        ui->lblStatus->setText("Entry deleted");
+        updateEmptyState();
     }
-}
-
-void MainWindow::onDataChanged(const QModelIndex &topLeft, const QModelIndex &bottomRight, const QVector<int> &roles)
-{
-    Q_UNUSED(bottomRight);
-    Q_UNUSED(roles);
-
-    PasswordEntry entry = m_tableModel->getEntryAt(topLeft.row());
-
-    if (entry.id > 0) {
-        entry.updatedAt = PasswordEntry::getCurrentTimestamp();
-        updateEntryInDatabase(entry);
-        QModelIndex dateIndex = m_tableModel->index(topLeft.row(), 6);
-        emit m_tableModel->dataChanged(dateIndex, dateIndex);
-    } else if (entry.id == 0 && entry.title != "New Entry") {
-        entry.updatedAt = PasswordEntry::getCurrentTimestamp();
-        saveEntryToDatabase(entry);
-    }
-
-    updateStatusBar();
 }
 
 void MainWindow::onCopyUsername()
 {
-    QModelIndex current = ui->tableViewAccounts->currentIndex();
-    if (current.isValid()) {
-        QString username = m_tableModel->data(m_tableModel->index(current.row(), 2)).toString();
-        if (!username.isEmpty()) {
-            QGuiApplication::clipboard()->setText(username);
-            ui->lblStatus->setText("Username copied: " + username);
+    PasswordEntry entry = getCurrentEntry();
+    if (entry.id > 0) {
+        if (!entry.username.isEmpty()) {
+            QGuiApplication::clipboard()->setText(entry.username);
+            ui->lblStatus->setText("Username copied: " + entry.username);
         } else {
             ui->lblStatus->setText("No username to copy");
         }
@@ -425,11 +329,10 @@ void MainWindow::onCopyUsername()
 
 void MainWindow::onCopyPassword()
 {
-    QModelIndex current = ui->tableViewAccounts->currentIndex();
-    if (current.isValid()) {
-        QString password = m_tableModel->data(m_tableModel->index(current.row(), 3)).toString();
-        if (!password.isEmpty()) {
-            QGuiApplication::clipboard()->setText(password);
+    PasswordEntry entry = getCurrentEntry();
+    if (entry.id > 0) {
+        if (!entry.password.isEmpty()) {
+            QGuiApplication::clipboard()->setText(entry.password);
             ui->lblStatus->setText("Password copied");
         } else {
             ui->lblStatus->setText("No password to copy");
@@ -463,78 +366,84 @@ void MainWindow::onGenerate()
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, "About Password Manager",
-                       "Password Manager v2.0\n\n"
+                       "Password Manager v3.0\n\n"
                        "A secure password management application\n"
                        "Built with Qt Framework\n\n"
                        "Features:\n"
                        "• SQLite database storage\n"
-                       "• CRUD operations with database\n"
+                       "• Model/View architecture\n"
+                       "• Search and filter with QSortFilterProxyModel\n"
                        "• In-place cell editing\n"
-                       "• Search and filter entries\n"
                        "• Light & Dark themes\n\n"
-                       "Practical Work No.17 - SQLite Integration");
+                       "Practical Work No.18 - Model/View, Search and Filter");
 }
 
 void MainWindow::onSearchTextChanged(const QString &text)
 {
-    filterTable(text, ui->comboBox->currentText());
-    if (ui->lblStatus) {
-        ui->lblStatus->setText(text.isEmpty() ? "Search cleared" : "Searching: " + text);
-    }
+    m_proxyModel->setSearchText(text);
+    updateStatusBar();
+    updateEmptyState();
+    ui->lblStatus->setText(text.isEmpty() ? "Search cleared" : "Searching: " + text);
 }
 
 void MainWindow::onClearSearch()
 {
-    if (ui->searchEdit) ui->searchEdit->clear();
-    filterTable("", ui->comboBox->currentText());
-    if (ui->lblStatus) ui->lblStatus->setText("Search cleared");
+    if (ui->searchEdit) {
+        ui->searchEdit->clear();
+        m_proxyModel->setSearchText("");
+        updateStatusBar();
+        updateEmptyState();
+        ui->lblStatus->setText("Search cleared");
+    }
 }
 
 void MainWindow::onCategoryChanged(int index)
 {
     Q_UNUSED(index);
-    filterTable(ui->searchEdit->text(), ui->comboBox->currentText());
-    if (ui->lblStatus) ui->lblStatus->setText("Filtering by category: " + ui->comboBox->currentText());
+    QString category = ui->comboBox->currentText();
+    m_proxyModel->setCategoryFilter(category);
+    updateStatusBar();
+    updateEmptyState();
+    ui->lblStatus->setText("Filtering by category: " + category);
 }
 
-void MainWindow::filterTable(const QString &searchText, const QString &category)
+void MainWindow::onResetFilters()
 {
-    for (int i = 0; i < m_tableModel->rowCount(); i++) {
-        bool showRow = true;
-
-        if (category != "All") {
-            QString itemCategory = m_tableModel->data(m_tableModel->index(i, 5)).toString();
-            if (itemCategory != category) showRow = false;
-        }
-
-        if (showRow && !searchText.isEmpty()) {
-            QString title = m_tableModel->data(m_tableModel->index(i, 1)).toString();
-            QString username = m_tableModel->data(m_tableModel->index(i, 2)).toString();
-            QString website = m_tableModel->data(m_tableModel->index(i, 4)).toString();
-
-            if (!title.contains(searchText, Qt::CaseInsensitive) &&
-                !username.contains(searchText, Qt::CaseInsensitive) &&
-                !website.contains(searchText, Qt::CaseInsensitive)) {
-                showRow = false;
-            }
-        }
-
-        ui->tableViewAccounts->setRowHidden(i, !showRow);
-    }
+    ui->searchEdit->clear();
+    ui->comboBox->setCurrentIndex(0); // "All"
+    m_proxyModel->clearFilters();
     updateStatusBar();
+    updateEmptyState();
+    ui->lblStatus->setText("All filters cleared");
 }
 
 void MainWindow::updateStatusBar()
 {
     if (ui->lblTotal && ui->lblFiltered) {
         int total = m_tableModel->rowCount();
+        int visible = m_proxyModel->rowCount();
         ui->lblTotal->setText(QString("Total: %1").arg(total));
-
-        int visible = 0;
-        for (int i = 0; i < total; i++) {
-            if (!ui->tableViewAccounts->isRowHidden(i)) visible++;
-        }
         ui->lblFiltered->setText(QString("Filtered: %1").arg(visible));
+    }
+}
+
+void MainWindow::updateEmptyState()
+{
+    bool isEmpty = (m_proxyModel->rowCount() == 0);
+    bool hasSearch = !ui->searchEdit->text().isEmpty();
+    bool hasCategory = ui->comboBox->currentText() != "All";
+
+    if (isEmpty && hasSearch && hasCategory) {
+        ui->lblStatus->setText("No results found for \"" + ui->searchEdit->text() +
+                               "\" in category \"" + ui->comboBox->currentText() + "\"");
+    } else if (isEmpty && hasSearch) {
+        ui->lblStatus->setText("No results found for \"" + ui->searchEdit->text() + "\"");
+    } else if (isEmpty && hasCategory) {
+        ui->lblStatus->setText("No entries in category \"" + ui->comboBox->currentText() + "\"");
+    } else if (isEmpty) {
+        ui->lblStatus->setText("No entries. Click 'New Entry' to add.");
+    } else if (!hasSearch && !hasCategory) {
+        ui->lblStatus->setText(QString("Showing %1 entries").arg(m_proxyModel->rowCount()));
     }
 }
 

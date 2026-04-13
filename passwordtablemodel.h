@@ -5,6 +5,8 @@
 #include <QList>
 #include "PasswordEntry.h"
 
+class PasswordRepository;
+
 class PasswordTableModel : public QAbstractTableModel
 {
     Q_OBJECT
@@ -19,16 +21,20 @@ public:
     Qt::ItemFlags flags(const QModelIndex &index) const override;
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
 
+    void setRepository(PasswordRepository *repository);
     void setEntries(const QList<PasswordEntry> &entries);
     QList<PasswordEntry> getEntries() const { return m_entries; }
     PasswordEntry getEntryAt(int row) const;
     void addEntry(const PasswordEntry &entry);
     void updateEntry(int row, const PasswordEntry &entry);
     void removeEntry(int row);
+    void reloadFromDatabase();
+    void refresh();
 
 private:
     QList<PasswordEntry> m_entries;
     QStringList m_headers;
+    PasswordRepository *m_repository;
 };
 
 #endif // PASSWORDTABLEMODEL_H
