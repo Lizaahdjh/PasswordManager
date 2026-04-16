@@ -5,6 +5,7 @@
 #include "PasswordEntry.h"
 #include "PasswordTableModel.h"
 #include "PasswordFilterProxyModel.h"
+#include "PasswordLeakChecker.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -36,12 +37,18 @@ private slots:
     void onClearSearch();
     void onCategoryChanged(int index);
     void onResetFilters();
+    void onToggleTestMode();
+    void onCheckPassword();
+    void onLeakCheckStarted();
+    void onLeakCheckCompleted(bool isLeaked, int breachCount);
+    void onLeakCheckFailed(const QString &errorMessage);
 
 private:
     Ui::MainWindow *ui;
     PasswordTableModel *m_tableModel;
     PasswordFilterProxyModel *m_proxyModel;
     PasswordRepository *m_repository;
+    PasswordLeakChecker *m_leakChecker;
 
     void setupTableColumns();
     void setupConnections();

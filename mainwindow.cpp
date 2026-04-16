@@ -2,12 +2,16 @@
 #include "ui_mainwindow.h"
 #include "DatabaseManager.h"
 #include "PasswordRepository.h"
+#include "PasswordLeakChecker.h"
 #include <QMessageBox>
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QDateTime>
 #include <QDebug>
 #include <QCoreApplication>
+#include <QInputDialog>
+#include <cstdlib>
+#include <ctime>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -15,6 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_tableModel(nullptr)
     , m_proxyModel(nullptr)
     , m_repository(nullptr)
+    , m_leakChecker(nullptr)
 {
     ui->setupUi(this);
 
@@ -30,12 +35,13 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     m_repository = new PasswordRepository(dbManager.database(), this);
-
     m_tableModel = new PasswordTableModel(this);
     m_tableModel->setRepository(m_repository);
-
     m_proxyModel = new PasswordFilterProxyModel(this);
     m_proxyModel->setSourceModel(m_tableModel);
+
+    m_leakChecker = new PasswordLeakChecker(this);
+    m_leakChecker->setTestMode(true);
 
     ui->tableViewAccounts->setModel(m_proxyModel);
     setupTableColumns();
@@ -46,6 +52,10 @@ MainWindow::MainWindow(QWidget *parent)
     if (m_tableModel->rowCount() == 0) {
         addTestDataToDatabase();
         loadDataFromDatabase();
+    }
+
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(false);
     }
 
     applyLightTheme();
@@ -97,11 +107,11 @@ void MainWindow::addTestDataToDatabase()
     QList<PasswordEntry> testEntries = {
         {0, "Google Account", "user@gmail.com", "google_pass_2024", "https://google.com", "Logins", currentDate},
         {0, "GitHub", "developer@github.com", "ghp_token_abc123xyz", "https://github.com", "Development", currentDate},
-        {0, "Facebook", "user@facebook.com", "fb_password_2024", "https://facebook.com", "Social Media", currentDate},
+        {0, "Facebook", "user@facebook.com", "password", "https://facebook.com", "Social Media", currentDate},
         {0, "Privat24", "+380501234567", "bank_pass_123", "https://privat24.ua", "Banking", currentDate},
         {0, "Netflix", "user@netflix.com", "netflix_2024", "https://netflix.com", "Entertainment", currentDate},
         {0, "Amazon", "buyer@amazon.com", "amazon_pass_2024", "https://amazon.com", "Shopping", currentDate},
-        {0, "Twitter (X)", "user@twitter.com", "twitter_pass_2024", "https://twitter.com", "Social Media", currentDate},
+        {0, "Twitter (X)", "user@twitter.com", "123456", "https://twitter.com", "Social Media", currentDate},
         {0, "LinkedIn", "professional@linkedin.com", "linkedin_2024", "https://linkedin.com", "Professional", currentDate},
         {0, "Home Wi-Fi", "Admin", "wifi_password_123", "192.168.1.1", "WiFi", currentDate},
         {0, "Windows 11 License", "user@microsoft.com", "WIN-XXXXX-XXXXX-XXXXX", "https://microsoft.com", "Software Licenses", currentDate}
@@ -152,7 +162,25 @@ void MainWindow::applyLightTheme()
         "QTableView::item:selected { background-color: #90caf9; color: #0d47a1; }"
         "QHeaderView::section { background-color: #e3f2fd; padding: 6px; border: none; border-right: 1px solid #bbdef5; color: #1565c0; font-weight: bold; }"
         "QStatusBar { background-color: #e3f2fd; color: #1565c0; }"
-        "QLabel { color: #1565c0; }";
+        "QLabel { color: #1565c0; }"
+        "QProgressBar {"
+        "    background-color: #e3f2fd;"
+        "    border: 1px solid #bbdef5;"
+        "    border-radius: 4px;"
+        "    text-align: center;"
+        "    color: #1565c0;"
+        "    font-size: 11px;"
+        "    height: 20px;"
+        "}"
+        "QProgressBar::chunk {"
+        "    background-color: #42a5f5;"
+        "    border-radius: 3px;"
+        "    margin: 1px;"
+        "}"
+        "QProgressBar:indeterminate::chunk {"
+        "    background-color: #90caf9;"
+        "    width: 20px;"
+        "}";
 
     setStyleSheet(styleSheet);
     if (ui->lblStatus) ui->lblStatus->setText("Light theme applied");
@@ -177,7 +205,25 @@ void MainWindow::applyDarkTheme()
         "QTableView::item:selected { background-color: #5a564c; color: #ffea4a; }"
         "QHeaderView::section { background-color: #3d3b35; color: #f5d742; }"
         "QStatusBar { background-color: #3d3b35; color: #f5d742; }"
-        "QLabel { color: #f5d742; }";
+        "QLabel { color: #f5d742; }"
+        "QProgressBar {"
+        "    background-color: #3d3b35;"
+        "    border: 1px solid #5a564c;"
+        "    border-radius: 4px;"
+        "    text-align: center;"
+        "    color: #f5d742;"
+        "    font-size: 11px;"
+        "    height: 20px;"
+        "}"
+        "QProgressBar::chunk {"
+        "    background-color: #f5d742;"
+        "    border-radius: 3px;"
+        "    margin: 1px;"
+        "}"
+        "QProgressBar:indeterminate::chunk {"
+        "    background-color: #ffea4a;"
+        "    width: 20px;"
+        "}";
 
     setStyleSheet(styleSheet);
     if (ui->lblStatus) ui->lblStatus->setText("Dark theme applied");
@@ -220,10 +266,17 @@ void MainWindow::setupConnections()
     if (ui->actionAbout) connect(ui->actionAbout, &QAction::triggered, this, &MainWindow::onAbout);
     if (ui->actionThemeLightBlue) connect(ui->actionThemeLightBlue, &QAction::triggered, this, &MainWindow::onThemeLightBlue);
     if (ui->actionThemeDarkYellow) connect(ui->actionThemeDarkYellow, &QAction::triggered, this, &MainWindow::onThemeDarkYellow);
+    if (ui->actionCheck_Password) connect(ui->actionCheck_Password, &QAction::triggered, this, &MainWindow::onCheckPassword);
 
     if (ui->searchEdit) connect(ui->searchEdit, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     if (ui->clearButton) connect(ui->clearButton, &QPushButton::clicked, this, &MainWindow::onClearSearch);
     if (ui->comboBox) connect(ui->comboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &MainWindow::onCategoryChanged);
+
+    if (m_leakChecker) {
+        connect(m_leakChecker, &PasswordLeakChecker::checkStarted, this, &MainWindow::onLeakCheckStarted);
+        connect(m_leakChecker, &PasswordLeakChecker::checkCompleted, this, &MainWindow::onLeakCheckCompleted);
+        connect(m_leakChecker, &PasswordLeakChecker::checkFailed, this, &MainWindow::onLeakCheckFailed);
+    }
 }
 
 void MainWindow::onNewEntry()
@@ -359,14 +412,69 @@ void MainWindow::onExit()
 
 void MainWindow::onGenerate()
 {
-    QMessageBox::information(this, "Generate Password",
-                             "Password generator will be implemented in future practical works");
+    PasswordEntry entry = getCurrentEntry();
+    if (entry.id <= 0) {
+        QMessageBox::information(this, "Generate Password",
+                                 "Please select an entry first to generate password for.");
+        return;
+    }
+
+    bool ok;
+    int length = QInputDialog::getInt(this, "Generate Password",
+                                      "Password length:", 16, 8, 64, 1, &ok);
+
+    if (!ok) return;
+
+    const QString chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                          "abcdefghijklmnopqrstuvwxyz"
+                          "0123456789"
+                          "!@#$%^&*()";
+
+    QString newPassword;
+
+    static bool seeded = false;
+    if (!seeded) {
+        std::srand(static_cast<unsigned int>(std::time(nullptr)));
+        seeded = true;
+    }
+
+    for (int i = 0; i < length; i++) {
+        int index = std::rand() % chars.length();
+        newPassword += chars[index];
+    }
+
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        "Generate Password",
+        QString("Generate a new password for '%1'?\n\nNew password: %2\n\nThe password will be automatically saved.")
+            .arg(entry.title).arg(newPassword),
+        QMessageBox::Yes | QMessageBox::No
+        );
+
+    if (reply == QMessageBox::Yes) {
+        entry.password = newPassword;
+        entry.updatedAt = PasswordEntry::getCurrentTimestamp();
+
+        if (m_repository && m_repository->update(entry)) {
+            int sourceRow = getCurrentSourceRow();
+            m_tableModel->updateEntry(sourceRow, entry);
+
+            ui->lblStatus->setText(QString("New %1-character password generated for '%2'")
+                                       .arg(length).arg(entry.title));
+
+            QMessageBox::information(this, "Success",
+                                     QString("Password for '%1' has been updated successfully!")
+                                         .arg(entry.title));
+        } else {
+            QMessageBox::warning(this, "Error", "Failed to save the new password to database.");
+        }
+    }
 }
 
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, "About Password Manager",
-                       "Password Manager v3.0\n\n"
+                       "Password Manager v4.0\n\n"
                        "A secure password management application\n"
                        "Built with Qt Framework\n\n"
                        "Features:\n"
@@ -374,8 +482,10 @@ void MainWindow::onAbout()
                        "• Model/View architecture\n"
                        "• Search and filter with QSortFilterProxyModel\n"
                        "• In-place cell editing\n"
+                       "• Password breach checking via Pwned Passwords API\n"
+                       "• Password generator\n"
                        "• Light & Dark themes\n\n"
-                       "Practical Work No.18 - Model/View, Search and Filter");
+                       "Practical Work No.19 - Network Requests with QNetworkAccessManager");
 }
 
 void MainWindow::onSearchTextChanged(const QString &text)
@@ -410,11 +520,121 @@ void MainWindow::onCategoryChanged(int index)
 void MainWindow::onResetFilters()
 {
     ui->searchEdit->clear();
-    ui->comboBox->setCurrentIndex(0); // "All"
+    ui->comboBox->setCurrentIndex(0);
     m_proxyModel->clearFilters();
     updateStatusBar();
     updateEmptyState();
     ui->lblStatus->setText("All filters cleared");
+}
+
+void MainWindow::onToggleTestMode()
+{
+    if (m_leakChecker) {
+        bool newMode = !m_leakChecker->isTestMode();
+        m_leakChecker->setTestMode(newMode);
+        ui->lblStatus->setText(newMode ? "Test mode: Local password check only" : "Real API mode (requires internet)");
+
+        QMessageBox::information(this, "Mode Changed",
+                                 newMode ? "Now in TEST MODE - checking against local weak password list.\n\n"
+                                           "Compromised test passwords include: password, 123456, qwerty, admin"
+                                         : "Now in REAL API MODE - checking against HaveIBeenPwned database.\n\n"
+                                           "Requires internet connection and SSL support.");
+    }
+}
+
+void MainWindow::onCheckPassword()
+{
+    PasswordEntry entry = getCurrentEntry();
+    if (entry.id <= 0) {
+        QMessageBox::information(this, "Check Password", "Please select an entry first");
+        return;
+    }
+
+    if (entry.password.isEmpty()) {
+        QMessageBox::information(this, "Check Password", "Selected entry has no password");
+        return;
+    }
+
+    if (m_leakChecker && m_leakChecker->isChecking()) {
+        ui->lblStatus->setText("Already checking a password, please wait...");
+        return;
+    }
+
+    ui->lblStatus->setText(QString("Checking password for '%1'...").arg(entry.title));
+    m_leakChecker->checkPassword(entry.password);
+}
+
+void MainWindow::onLeakCheckStarted()
+{
+    if (ui->actionCheck_Password) {
+        ui->actionCheck_Password->setEnabled(false);
+    }
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(true);
+        ui->progressBar->setRange(0, 0);
+    }
+    if (ui->passwordCheckStatus) {
+        ui->passwordCheckStatus->setText("Checking password...");
+        ui->passwordCheckStatus->setStyleSheet("color: #ff9800;");
+    }
+    ui->lblStatus->setText("Checking password against breach database...");
+}
+
+void MainWindow::onLeakCheckCompleted(bool isLeaked, int breachCount)
+{
+    if (ui->actionCheck_Password) {
+        ui->actionCheck_Password->setEnabled(true);
+    }
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(false);
+        ui->progressBar->setRange(0, 100);
+    }
+
+    PasswordEntry entry = getCurrentEntry();
+
+    if (isLeaked) {
+        if (ui->passwordCheckStatus) {
+            ui->passwordCheckStatus->setText(QString(" COMPROMISED! Found in %1 breaches").arg(breachCount));
+            ui->passwordCheckStatus->setStyleSheet("color: #f44336; font-weight: bold;");
+        }
+        QMessageBox::warning(this, "Security Alert",
+                             QString(" PASSWORD COMPROMISED!\n\n"
+                                     "Password '%1' has been found in %2 data breaches!\n\n"
+                                     "This password appears in leaked password databases.\n"
+                                     "Change it immediately!")
+                                 .arg(entry.password).arg(breachCount));
+        ui->lblStatus->setText(" Password is compromised!");
+    } else {
+        if (ui->passwordCheckStatus) {
+            ui->passwordCheckStatus->setText(" Safe - Not found in any breaches");
+            ui->passwordCheckStatus->setStyleSheet("color: #4caf50;");
+        }
+        QMessageBox::information(this, "Password Check",
+                                 QString("✓ PASSWORD IS SAFE!\n\n"
+                                         "Password '%1' was not found in any known data breaches.\n\n"
+                                         "However, always use unique strong passwords for each account.")
+                                     .arg(entry.password));
+        ui->lblStatus->setText("✓ Password is safe");
+    }
+}
+
+void MainWindow::onLeakCheckFailed(const QString &errorMessage)
+{
+    if (ui->actionCheck_Password) {
+        ui->actionCheck_Password->setEnabled(true);
+    }
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(false);
+    }
+    if (ui->passwordCheckStatus) {
+        ui->passwordCheckStatus->setText(QString(" Check failed: %1").arg(errorMessage));
+        ui->passwordCheckStatus->setStyleSheet("color: #f44336;");
+    }
+    ui->lblStatus->setText("Check failed: " + errorMessage);
+    QMessageBox::warning(this, "Check Failed",
+                         QString("Password check failed:\n%1\n\n"
+                                 "Check your internet connection and try again.")
+                             .arg(errorMessage));
 }
 
 void MainWindow::updateStatusBar()

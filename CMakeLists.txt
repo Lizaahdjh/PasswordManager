@@ -6,7 +6,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql Network)
 
 qt_standard_project_setup()
 
@@ -25,6 +25,8 @@ qt_add_executable(PasswordManager
     PasswordTableModel.h
     PasswordFilterProxyModel.cpp
     PasswordFilterProxyModel.h
+    PasswordLeakChecker.cpp
+    PasswordLeakChecker.h
 )
 
 target_link_libraries(PasswordManager
@@ -32,6 +34,7 @@ target_link_libraries(PasswordManager
         Qt::Core
         Qt::Widgets
         Qt::Sql
+        Qt::Network
 )
 
 install(TARGETS PasswordManager
