@@ -253,6 +253,7 @@
    <addaction name="actionCopy_Username"/>
    <addaction name="actionCopy_Password"/>
    <addaction name="actionCheck_Password"/>
+   <addaction name="actionCheck_All_Passwords"/>
   </widget>
   <action name="actionAbout">
    <property name="icon">
@@ -392,6 +393,17 @@
    </property>
    <property name="text">
     <string>Check Password</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::NoRole</enum>
+   </property>
+  </action>
+  <action name="actionCheck_All_Passwords">
+   <property name="icon">
+    <iconset theme="QIcon::ThemeIcon::EditSelectAll"/>
+   </property>
+   <property name="text">
+    <string>Check All Passwords</string>
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::NoRole</enum>

@@ -27,6 +27,8 @@ qt_add_executable(PasswordManager
     PasswordFilterProxyModel.h
     PasswordLeakChecker.cpp
     PasswordLeakChecker.h
+    BatchCheckWorker.cpp
+    BatchCheckWorker.h
 )
 
 target_link_libraries(PasswordManager

@@ -3,6 +3,7 @@
 #include "DatabaseManager.h"
 #include "PasswordRepository.h"
 #include "PasswordLeakChecker.h"
+#include "BatchCheckWorker.h"
 #include <QMessageBox>
 #include <QGuiApplication>
 #include <QClipboard>
@@ -20,6 +21,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_proxyModel(nullptr)
     , m_repository(nullptr)
     , m_leakChecker(nullptr)
+    , m_batchThread(nullptr)
+    , m_batchWorker(nullptr)
+    , m_batchRunning(false)
 {
     ui->setupUi(this);
 
@@ -56,6 +60,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (ui->progressBar) {
         ui->progressBar->setVisible(false);
+        ui->progressBar->setValue(0);
+        ui->progressBar->setRange(0, 100);
     }
 
     applyLightTheme();
@@ -64,6 +70,9 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    if (m_batchRunning) {
+        onCancelBatchCheck();
+    }
     DatabaseManager::instance().close();
     delete ui;
 }
@@ -267,6 +276,7 @@ void MainWindow::setupConnections()
     if (ui->actionThemeLightBlue) connect(ui->actionThemeLightBlue, &QAction::triggered, this, &MainWindow::onThemeLightBlue);
     if (ui->actionThemeDarkYellow) connect(ui->actionThemeDarkYellow, &QAction::triggered, this, &MainWindow::onThemeDarkYellow);
     if (ui->actionCheck_Password) connect(ui->actionCheck_Password, &QAction::triggered, this, &MainWindow::onCheckPassword);
+    if (ui->actionCheck_All_Passwords) connect(ui->actionCheck_All_Passwords, &QAction::triggered, this, &MainWindow::onCheckAllPasswords);
 
     if (ui->searchEdit) connect(ui->searchEdit, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     if (ui->clearButton) connect(ui->clearButton, &QPushButton::clicked, this, &MainWindow::onClearSearch);
@@ -474,7 +484,7 @@ void MainWindow::onGenerate()
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, "About Password Manager",
-                       "Password Manager v4.0\n\n"
+                       "Password Manager v5.0\n\n"
                        "A secure password management application\n"
                        "Built with Qt Framework\n\n"
                        "Features:\n"
@@ -483,9 +493,10 @@ void MainWindow::onAbout()
                        "• Search and filter with QSortFilterProxyModel\n"
                        "• In-place cell editing\n"
                        "• Password breach checking via Pwned Passwords API\n"
+                       "• Batch check all passwords with background thread\n"
                        "• Password generator\n"
                        "• Light & Dark themes\n\n"
-                       "Practical Work No.19 - Network Requests with QNetworkAccessManager");
+                       "Practical Work No.20 - Asynchronous and Multi-threading");
 }
 
 void MainWindow::onSearchTextChanged(const QString &text)
@@ -564,6 +575,155 @@ void MainWindow::onCheckPassword()
     m_leakChecker->checkPassword(entry.password);
 }
 
+void MainWindow::onCheckAllPasswords()
+{
+    if (m_batchRunning) {
+        QMessageBox::information(this, "Batch Check", "Batch check is already running!");
+        return;
+    }
+
+    QList<PasswordEntry> entries = m_tableModel->getEntries();
+    if (entries.isEmpty()) {
+        QMessageBox::information(this, "Batch Check", "No entries to check!");
+        return;
+    }
+
+    int passwordCount = 0;
+    for (const auto &entry : entries) {
+        if (!entry.password.isEmpty()) passwordCount++;
+    }
+
+    if (passwordCount == 0) {
+        QMessageBox::information(this, "Batch Check", "No passwords to check!");
+        return;
+    }
+
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        "Batch Password Check",
+        QString("Check all %1 passwords?\n\nThis may take a few moments.\n\n"
+                "The check will run in the background and will not freeze the application.")
+            .arg(passwordCount),
+        QMessageBox::Yes | QMessageBox::No
+        );
+
+    if (reply != QMessageBox::Yes) return;
+
+    m_batchThread = new QThread(this);
+    m_batchWorker = new BatchCheckWorker();
+    m_batchWorker->moveToThread(m_batchThread);
+    m_batchWorker->setTestMode(m_leakChecker->isTestMode());
+
+    connect(m_batchThread, &QThread::started, m_batchWorker, [this, entries]() {
+        m_batchWorker->processAll(entries);
+    });
+    connect(m_batchWorker, &BatchCheckWorker::progressChanged, this, &MainWindow::onBatchProgressChanged);
+    connect(m_batchWorker, &BatchCheckWorker::entryChecked, this, &MainWindow::onEntryChecked);
+    connect(m_batchWorker, &BatchCheckWorker::finished, this, &MainWindow::onBatchFinished);
+    connect(m_batchWorker, &BatchCheckWorker::error, this, &MainWindow::onBatchError);
+    connect(m_batchWorker, &BatchCheckWorker::finished, m_batchThread, &QThread::quit);
+    connect(m_batchWorker, &BatchCheckWorker::finished, m_batchWorker, &QObject::deleteLater);
+    connect(m_batchThread, &QThread::finished, m_batchThread, &QObject::deleteLater);
+
+    m_batchRunning = true;
+    setBatchCheckEnabled(false);
+
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(true);
+        ui->progressBar->setRange(0, passwordCount);
+        ui->progressBar->setValue(0);
+        ui->progressBar->setFormat(QString("Checking 0 of %1").arg(passwordCount));
+    }
+
+    ui->lblStatus->setText(QString("Starting batch check of %1 passwords...").arg(passwordCount));
+    m_batchThread->start();
+}
+
+void MainWindow::onCancelBatchCheck()
+{
+    if (m_batchWorker && m_batchRunning) {
+        m_batchWorker->cancel();
+        ui->lblStatus->setText("Cancelling batch check...");
+    }
+}
+
+void MainWindow::onBatchProgressChanged(int current, int total)
+{
+    if (ui->progressBar) {
+        ui->progressBar->setValue(current);
+        ui->progressBar->setFormat(QString("Checking %1 of %2").arg(current).arg(total));
+    }
+    ui->lblStatus->setText(QString("Checking passwords: %1 of %2").arg(current).arg(total));
+}
+
+void MainWindow::onEntryChecked(int entryId, bool isCompromised, int breachCount)
+{
+    updateEntryInTable(entryId, isCompromised, breachCount);
+}
+
+void MainWindow::onBatchFinished(const BatchCheckResult &result)
+{
+    m_batchRunning = false;
+    setBatchCheckEnabled(true);
+
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(false);
+        ui->progressBar->setFormat("%p%");
+    }
+
+    QString message = QString(
+                          "Batch Password Check Completed!\n\n"
+                          "Total passwords checked: %1\n"
+                          "Compromised passwords found: %2\n"
+                          "Failed checks: %3\n\n"
+                          "The security status column has been updated for all entries."
+                          ).arg(result.total).arg(result.compromised).arg(result.failed);
+
+    if (result.compromised > 0) {
+        message += QString("\n\nWARNING: %1 of your passwords have been found in data breaches!\n"
+                           "Consider changing them immediately.").arg(result.compromised);
+        QMessageBox::warning(this, "Batch Check Complete", message);
+    } else {
+        message += "\n\nAll your passwords are safe!";
+        QMessageBox::information(this, "Batch Check Complete", message);
+    }
+
+    ui->lblStatus->setText(QString("Batch check completed: %1 compromised passwords found")
+                               .arg(result.compromised));
+    updateStatusBar();
+}
+
+void MainWindow::onBatchError(const QString &errorMessage)
+{
+    m_batchRunning = false;
+    setBatchCheckEnabled(true);
+
+    if (ui->progressBar) {
+        ui->progressBar->setVisible(false);
+    }
+
+    showErrorMessage("Batch Check Error", errorMessage);
+    ui->lblStatus->setText("Batch check failed: " + errorMessage);
+}
+
+void MainWindow::updateEntryInTable(int entryId, bool isCompromised, int breachCount)
+{
+    QList<PasswordEntry> entries = m_tableModel->getEntries();
+    for (int i = 0; i < entries.size(); i++) {
+        if (entries[i].id == entryId && isCompromised) {
+            qDebug() << "Entry" << entryId << "is compromised! Count:" << breachCount;
+            break;
+        }
+    }
+}
+
+void MainWindow::setBatchCheckEnabled(bool enabled)
+{
+    if (ui->actionCheck_All_Passwords) {
+        ui->actionCheck_All_Passwords->setEnabled(enabled);
+    }
+}
+
 void MainWindow::onLeakCheckStarted()
 {
     if (ui->actionCheck_Password) {
@@ -594,19 +754,19 @@ void MainWindow::onLeakCheckCompleted(bool isLeaked, int breachCount)
 
     if (isLeaked) {
         if (ui->passwordCheckStatus) {
-            ui->passwordCheckStatus->setText(QString(" COMPROMISED! Found in %1 breaches").arg(breachCount));
+            ui->passwordCheckStatus->setText(QString("COMPROMISED! Found in %1 breaches").arg(breachCount));
             ui->passwordCheckStatus->setStyleSheet("color: #f44336; font-weight: bold;");
         }
         QMessageBox::warning(this, "Security Alert",
-                             QString(" PASSWORD COMPROMISED!\n\n"
+                             QString("PASSWORD COMPROMISED!\n\n"
                                      "Password '%1' has been found in %2 data breaches!\n\n"
                                      "This password appears in leaked password databases.\n"
                                      "Change it immediately!")
                                  .arg(entry.password).arg(breachCount));
-        ui->lblStatus->setText(" Password is compromised!");
+        ui->lblStatus->setText("Password is compromised!");
     } else {
         if (ui->passwordCheckStatus) {
-            ui->passwordCheckStatus->setText(" Safe - Not found in any breaches");
+            ui->passwordCheckStatus->setText("Safe - Not found in any breaches");
             ui->passwordCheckStatus->setStyleSheet("color: #4caf50;");
         }
         QMessageBox::information(this, "Password Check",
@@ -627,7 +787,7 @@ void MainWindow::onLeakCheckFailed(const QString &errorMessage)
         ui->progressBar->setVisible(false);
     }
     if (ui->passwordCheckStatus) {
-        ui->passwordCheckStatus->setText(QString(" Check failed: %1").arg(errorMessage));
+        ui->passwordCheckStatus->setText(QString("Check failed: %1").arg(errorMessage));
         ui->passwordCheckStatus->setStyleSheet("color: #f44336;");
     }
     ui->lblStatus->setText("Check failed: " + errorMessage);
